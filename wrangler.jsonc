@@ -1,0 +1,19 @@
+{
+  // Cloudflare Workers config for the OpenNext adapter (@opennextjs/cloudflare).
+  // Secrets are NOT stored here — set them in the Cloudflare dashboard
+  // (Workers & Pages → Settings → Variables and Secrets) or via
+  // `npx wrangler secret put <NAME>`. This file is committed to git.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "postcraft-ai",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-01",
+  // nodejs_compat is required by the OpenNext runtime.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
