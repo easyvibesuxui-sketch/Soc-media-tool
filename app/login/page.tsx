@@ -1,0 +1,184 @@
+'use client'
+
+import { useState } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { Sparkles, Mail, Lock, Eye, EyeOff, Loader2, Chrome } from 'lucide-react'
+import { getSupabase, isSupabaseConfigured } from '@/lib/supabase'
+
+export default function LoginPage() {
+  const router = useRouter()
+  const [mode, setMode] = useState<'signin' | 'signup'>('signup')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPass, setShowPass] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  const handleGoogle = async () => {
+    if (!isSupabaseConfigured()) { setError('Auth not configured — add Supabase keys to .env.local'); return }
+    setGoogleLoading(true)
+    setError(null)
+    try {
+      await getSupabase().auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}/auth/callback?next=/tool` },
+      })
+    } catch {
+      setError('Google sign-in failed. Try again.')
+      setGoogleLoading(false)
+    }
+  }
+
+  const handleEmail = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!isSupabaseConfigured()) { setError('Auth not configured — add Supabase keys to .env.local'); return }
+    setLoading(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      if (mode === 'signup') {
+        const { error } = await getSupabase().auth.signUp({
+          email, password,
+          options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/tool` },
+        })
+        if (error) throw error
+        setSuccess('Check your email — click the confirmation link to activate your account.')
+      } else {
+        const { error } = await getSupabase().auth.signInWithPassword({ email, password })
+        if (error) throw error
+        router.push('/tool')
+        router.refresh() // re-run server components with the new session
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Authentication failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-fuchsia-50 flex flex-col items-center justify-center px-4 py-12">
+      {/* Logo */}
+      <Link href="/" className="flex items-center gap-2 mb-8 group">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-200 group-hover:shadow-violet-300 transition-shadow">
+          <Sparkles size={18} className="text-white" />
+        </div>
+        <span className="font-extrabold text-gray-900 text-xl">
+          PostCraft<span className="text-violet-600"> AI</span>
+        </span>
+      </Link>
+
+      <div className="w-full max-w-sm">
+        {/* Card */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-xl shadow-gray-100/60 p-8">
+          {/* Tabs */}
+          <div className="flex bg-gray-100 rounded-xl p-1 mb-6">
+            {(['signup', 'signin'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => { setMode(m); setError(null); setSuccess(null) }}
+                className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  mode === m ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {m === 'signup' ? 'Get Started' : 'Sign In'}
+              </button>
+            ))}
+          </div>
+
+          <h1 className="text-xl font-extrabold text-gray-900 mb-1">
+            {mode === 'signup' ? 'Create your free account' : 'Welcome back'}
+          </h1>
+          <p className="text-sm text-gray-500 mb-6">
+            {mode === 'signup'
+              ? '5 free generations per day. No credit card.'
+              : 'Continue creating scroll-stopping content.'}
+          </p>
+
+          {/* Google */}
+          <button
+            type="button"
+            onClick={handleGoogle}
+            disabled={googleLoading}
+            className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-violet-300 hover:bg-violet-50 disabled:opacity-60 transition-all mb-4"
+          >
+            {googleLoading ? <Loader2 size={16} className="animate-spin" /> : <Chrome size={16} className="text-blue-500" />}
+            Continue with Google
+          </button>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 h-px bg-gray-200" />
+            <span className="text-xs text-gray-400 font-medium">or use email</span>
+            <div className="flex-1 h-px bg-gray-200" />
+          </div>
+
+          {/* Email form */}
+          <form onSubmit={handleEmail} className="space-y-3">
+            <div className="relative">
+              <Mail size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                required
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-300 transition-all"
+              />
+            </div>
+            <div className="relative">
+              <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                required
+                type={showPass ? 'text' : 'password'}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder={mode === 'signup' ? 'Create a password (6+ chars)' : 'Your password'}
+                minLength={6}
+                className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-300 transition-all"
+              />
+              <button type="button" onClick={() => setShowPass(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-3 py-2">{error}</div>
+            )}
+            {success && (
+              <div className="bg-green-50 border border-green-200 text-green-700 text-xs rounded-lg px-3 py-2">{success}</div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white font-bold text-sm hover:opacity-90 disabled:opacity-60 transition-all shadow-md shadow-violet-200"
+            >
+              {loading && <Loader2 size={15} className="animate-spin" />}
+              {mode === 'signup' ? 'Create Account' : 'Sign In'}
+            </button>
+          </form>
+
+          {mode === 'signin' && (
+            <p className="text-center text-xs text-gray-400 mt-4">
+              Don&apos;t have an account?{' '}
+              <button onClick={() => setMode('signup')} className="text-violet-600 font-semibold hover:underline">
+                Sign up free
+              </button>
+            </p>
+          )}
+        </div>
+
+        <p className="text-center text-xs text-gray-400 mt-5">
+          By continuing you agree to our{' '}
+          <Link href="/terms" className="underline hover:text-gray-600">Terms</Link>
+          {' '}&amp;{' '}
+          <Link href="/privacy" className="underline hover:text-gray-600">Privacy Policy</Link>
+        </p>
+      </div>
+    </div>
+  )
+}
