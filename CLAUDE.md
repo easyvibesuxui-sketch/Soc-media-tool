@@ -39,7 +39,6 @@ app/
     generate-suggestions/
     generate-video/
     generate-blog/       PUBLIC (crawlers need it) + cached
-    check-limit/         legacy, superseded by lib/api-guard.ts
     webhook/lemonsqueezy/
 lib/
   groq.ts        Model registry + callAI() with retry/failover. Core AI entry point.
@@ -184,8 +183,21 @@ Before saying a change works:
 - Supabase keys empty → login non-functional, AI routes 503 in production
 - Contact form is simulated (`setSent(true)`), sends nothing — needs Resend/Formspree
 - No GA4, no AdSense script tag yet
-- `app/api/check-limit/route.ts` is superseded by `lib/api-guard.ts` — trusts a
-  client-supplied `userId`. Delete or rewrite; don't build on it.
+- **Usage is only counted for images.** `generate-caption`, `generate-hashtags`,
+  `generate-suggestions` and `generate-video` import `recordUsage` but never call it,
+  so the daily limit only bites on images. Decide what one "generation" means
+  (one image? one full post?) before wiring it — one post = 4 images + caption +
+  hashtags + description, so counting every call burns 5/day in a single post.
+- **Google login / email confirmation likely broken.** supabase-js defaults to the
+  *implicit* flow (`#access_token=` fragment, no `?code=`), so `/auth/callback`
+  finds no code and redirects to `/auth/error`; and even with PKCE the server-side
+  exchange can't see the verifier in browser localStorage, and the resulting session
+  would never reach the browser. Verify once Supabase is configured; likely fix is
+  a client-side callback page (or `@supabase/ssr` with cookies).
+- LemonSqueezy webhook: `listUsers()` only returns the first page (50 users), and
+  the signature compare isn't constant-time.
+- `npm audit` shows 7 high (braces, via tailwindcss 3 build tooling only — not
+  shipped to the runtime).
 - Pricing page advertises a $29 Pro tier with no checkout wired up
 - Landing page stats ("50k+ posts", testimonials) are placeholder copy, not real
 - `_unused-components/` can be deleted

@@ -5,7 +5,10 @@ import { createAdminClient } from '@/lib/supabase'
 export async function GET(req: NextRequest) {
   const { searchParams, origin } = new URL(req.url)
   const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/'
+  // Only same-site paths: `${origin}${next}` with next="@evil.com" or
+  // "//evil.com" would otherwise redirect off-site (open redirect).
+  const rawNext = searchParams.get('next') ?? '/'
+  const next = /^\/(?![/\\])/.test(rawNext) ? rawNext : '/'
 
   if (code) {
     const supabase = createClient(
