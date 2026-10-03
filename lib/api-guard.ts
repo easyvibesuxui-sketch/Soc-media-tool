@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import { createAdminClient, isSupabaseConfigured } from '@/lib/supabase'
+import { createUserClient, isSupabaseConfigured } from '@/lib/supabase'
 import { FREE_DAILY_LIMIT } from '@/lib/groq'
 
-export type GuardResult =
-  | { ok: true; userId: string | null; isPaid: boolean; remaining: number }
-  | { ok: false; response: NextResponse }
+export type GuardOk = {
+  ok: true
+  userId: string | null
+  /** The caller's verified access token — reused to record usage as that user. */
+  token: string | null
+  isPaid: boolean
+  remaining: number
+}
+
+export type GuardResult = GuardOk | { ok: false; response: NextResponse }
+
+const todayUtc = () => new Date().toISOString().split('T')[0]
 
 /**
  * Verifies the caller's Supabase JWT (sent as `Authorization: Bearer <token>`)
@@ -14,19 +22,22 @@ export type GuardResult =
  * The user id is derived from the *verified token*, never from the request body —
  * clients cannot spoof another user or opt out of the limit.
  *
+ * Runs entirely as the caller (anon key + their JWT, RLS applies): the app needs
+ * no service-role key. `users` is read-only to clients, so `is_paid` can't be
+ * self-granted; the only write is `increment_my_usage()`, which can only raise
+ * the caller's own counter.
+ *
  * When Supabase is not configured (local dev) the guard is a no-op.
  */
 export async function guardRequest(req: NextRequest): Promise<GuardResult> {
-  const supabaseReady = isSupabaseConfigured() && !!process.env.SUPABASE_SERVICE_ROLE_KEY
-
-  if (!supabaseReady) {
+  if (!isSupabaseConfigured()) {
     // FAIL CLOSED in production. If the Supabase env vars are missing on a
     // deployed instance, every AI route would otherwise be wide open to the
     // internet and bill our API keys. Refuse instead.
     if (process.env.NODE_ENV === 'production') {
       console.error(
         '[api-guard] Supabase env vars missing in production — refusing unauthenticated AI requests. ' +
-        'Set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY.'
+        'Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.'
       )
       return {
         ok: false,
@@ -37,7 +48,7 @@ export async function guardRequest(req: NextRequest): Promise<GuardResult> {
       }
     }
     // Local dev only: allow through so the tool is usable without Supabase.
-    return { ok: true, userId: null, isPaid: false, remaining: FREE_DAILY_LIMIT }
+    return { ok: true, userId: null, token: null, isPaid: false, remaining: FREE_DAILY_LIMIT }
   }
 
   const authHeader = req.headers.get('authorization') ?? ''
@@ -53,12 +64,10 @@ export async function guardRequest(req: NextRequest): Promise<GuardResult> {
     }
   }
 
+  const sb = createUserClient(token)
+
   // Verify the token against Supabase — this is the only trusted source of identity.
-  const anon = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
-  const { data: userData, error: userErr } = await anon.auth.getUser(token)
+  const { data: userData, error: userErr } = await sb.auth.getUser(token)
 
   if (userErr || !userData?.user) {
     return {
@@ -71,32 +80,20 @@ export async function guardRequest(req: NextRequest): Promise<GuardResult> {
   }
 
   const userId = userData.user.id
-  const admin = createAdminClient()
-  const today = new Date().toISOString().split('T')[0]
 
-  const { data: row } = await admin
+  // RLS limits this to the caller's own row. A missing row (created by the
+  // sign-up trigger, so rare) just means no usage yet.
+  const { data: row } = await sb
     .from('users')
     .select('is_paid, daily_count, last_reset')
     .eq('id', userId)
-    .single()
+    .maybeSingle()
 
-  // First time we see this user — create the row.
-  if (!row) {
-    await admin.from('users').insert({
-      id: userId,
-      email: userData.user.email,
-      daily_count: 0,
-      last_reset: today,
-      is_paid: false,
-    })
-    return { ok: true, userId, isPaid: false, remaining: FREE_DAILY_LIMIT }
+  if (row?.is_paid) {
+    return { ok: true, userId, token, isPaid: true, remaining: Number.POSITIVE_INFINITY }
   }
 
-  if (row.is_paid) {
-    return { ok: true, userId, isPaid: true, remaining: Number.POSITIVE_INFINITY }
-  }
-
-  const usedToday = row.last_reset === today ? (row.daily_count ?? 0) : 0
+  const usedToday = row && row.last_reset === todayUtc() ? (row.daily_count ?? 0) : 0
   const remaining = FREE_DAILY_LIMIT - usedToday
 
   if (remaining <= 0) {
@@ -113,30 +110,16 @@ export async function guardRequest(req: NextRequest): Promise<GuardResult> {
     }
   }
 
-  return { ok: true, userId, isPaid: false, remaining }
+  return { ok: true, userId, token, isPaid: false, remaining }
 }
 
 /** Increments the caller's daily usage. Call only after a generation succeeds. */
-export async function recordUsage(userId: string | null, isPaid: boolean) {
-  if (!userId || isPaid) return
-  if (!isSupabaseConfigured() || !process.env.SUPABASE_SERVICE_ROLE_KEY) return
+export async function recordUsage(guard: GuardOk) {
+  if (!guard.token || guard.isPaid) return
 
   try {
-    const admin = createAdminClient()
-    const today = new Date().toISOString().split('T')[0]
-
-    const { data: row } = await admin
-      .from('users')
-      .select('daily_count, last_reset')
-      .eq('id', userId)
-      .single()
-
-    const next = row && row.last_reset === today ? (row.daily_count ?? 0) + 1 : 1
-
-    await admin
-      .from('users')
-      .update({ daily_count: next, last_reset: today })
-      .eq('id', userId)
+    const { error } = await createUserClient(guard.token).rpc('increment_my_usage')
+    if (error) throw error
   } catch (err) {
     // Never fail the user's request because usage bookkeeping failed.
     console.error('recordUsage error:', err)

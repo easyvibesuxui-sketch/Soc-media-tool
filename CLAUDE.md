@@ -29,7 +29,7 @@ app/
   blog/page.tsx         Blog index (reads lib/blog.ts)
   blog/[slug]/page.tsx  Post — fetches AI-generated body at runtime
   about|contact|privacy|terms/   AdSense-required pages
-  auth/callback/route.ts  OAuth code exchange + user upsert
+  auth/callback/page.tsx  CLIENT-side PKCE code exchange (must stay client-side)
   auth/error/page.tsx
   sitemap.ts, robots.ts   SEO (use NEXT_PUBLIC_SITE_URL)
   api/
@@ -133,7 +133,7 @@ HF_TOKEN=               # failover
 # Auth — REQUIRED IN PRODUCTION (without these the AI routes return 503)
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_SERVICE_ROLE_KEY=   # only the LemonSqueezy webhook needs it
 
 # SEO — sitemap / robots / canonical
 NEXT_PUBLIC_SITE_URL=https://your-domain.com
@@ -148,7 +148,23 @@ NEXT_PUBLIC_LEMONSQUEEZY_CHECKOUT_URL=
 **Never commit `.env.local`.** It is gitignored. Do not paste key values into
 code, docs, commit messages or chat.
 
-### Supabase `users` table
+### Supabase
+
+Project **`postcraft-ai`** (ref `xiynijihohlxqvkfzblr`, eu-central-1, free plan).
+URL + publishable key are committed in `.env.production` (public by design).
+Schema lives in `supabase/migrations/` — add new SQL there and apply it.
+
+- RLS on `users`: clients can only SELECT their own row; no client writes.
+- Trigger `on_auth_user_created` inserts the `users` row at sign-up.
+- `increment_my_usage()` (SECURITY DEFINER, callable by `authenticated`) is the
+  only write path; it can only raise the caller's own counter.
+- So the guard runs as the caller (`createUserClient(token)`) and AI routes need
+  **no service-role key**.
+- Auth uses **PKCE** (`flowType: 'pkce'` in `getSupabase()`); the exchange happens
+  in the browser at `/auth/callback`, because the verifier and the session both
+  live in browser storage. A server route can't do it — that's why the old one never worked.
+
+#### `users` table
 `id` (uuid, PK) · `email` (text) · `is_paid` (bool) · `daily_count` (int)
 · `last_reset` (date) · `created_at` (timestamp)
 
@@ -180,7 +196,8 @@ Before saying a change works:
 
 ## Known gaps / TODO
 
-- Supabase keys empty → login non-functional, AI routes 503 in production
+- Supabase Auth dashboard settings not done yet: Site URL + redirect URLs, Google
+  provider (needs Google Cloud OAuth client). See DEPLOY.md.
 - Contact form is simulated (`setSent(true)`), sends nothing — needs Resend/Formspree
 - No GA4, no AdSense script tag yet
 - **Usage is only counted for images.** `generate-caption`, `generate-hashtags`,
@@ -188,12 +205,6 @@ Before saying a change works:
   so the daily limit only bites on images. Decide what one "generation" means
   (one image? one full post?) before wiring it — one post = 4 images + caption +
   hashtags + description, so counting every call burns 5/day in a single post.
-- **Google login / email confirmation likely broken.** supabase-js defaults to the
-  *implicit* flow (`#access_token=` fragment, no `?code=`), so `/auth/callback`
-  finds no code and redirects to `/auth/error`; and even with PKCE the server-side
-  exchange can't see the verifier in browser localStorage, and the resulting session
-  would never reach the browser. Verify once Supabase is configured; likely fix is
-  a client-side callback page (or `@supabase/ssr` with cookies).
 - LemonSqueezy webhook: `listUsers()` only returns the first page (50 users), and
   the signature compare isn't constant-time.
 - `npm audit` shows 7 high (braces, via tailwindcss 3 build tooling only — not

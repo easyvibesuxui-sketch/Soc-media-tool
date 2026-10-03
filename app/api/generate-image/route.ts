@@ -127,7 +127,7 @@ Create a high-quality image prompt that visually represents this topic perfectly
       if (imageModelId === 'gemini') {
         const geminiUrl = await generateWithGemini(prompt)
         if (geminiUrl) {
-          await recordUsage(guard.userId, guard.isPaid)
+          await recordUsage(guard)
           return NextResponse.json({ imageUrl: geminiUrl, imagePrompt: prompt })
         }
         console.warn('Gemini image gen failed, falling back to Pollinations')
@@ -156,7 +156,7 @@ Create a high-quality image prompt that visually represents this topic perfectly
           }
           const b64 = toBase64(buf)
           const mime = polRes.headers.get('content-type') ?? 'image/jpeg'
-          await recordUsage(guard.userId, guard.isPaid)
+          await recordUsage(guard)
           return NextResponse.json({ imageUrl: `data:${mime};base64,${b64}`, imagePrompt: prompt })
         } catch (e) {
           lastErr = e instanceof Error ? e.message : String(e)
@@ -181,7 +181,7 @@ Create a high-quality image prompt that visually represents this topic perfectly
       )
       if (!res.ok) throw new Error(`HF image error ${res.status}: ${await res.text()}`)
       const base64 = toBase64(await res.arrayBuffer())
-      await recordUsage(guard.userId, guard.isPaid)
+      await recordUsage(guard)
       return NextResponse.json({ imageUrl: `data:image/jpeg;base64,${base64}`, imagePrompt: prompt })
     }
 
