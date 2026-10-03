@@ -102,6 +102,12 @@ Prefer Gemini's `*-latest` aliases so Google's next retirement doesn't break us.
 default effort. `callGroq` sends `reasoning_effort: 'low'` and falls back to the
 `reasoning` field. Don't remove either.
 
+### 6b. Pollinations text is a keyless last resort, not a provider to rely on
+`callAI()` always appends `pollinations-text` (text.pollinations.ai, no key) at the
+end of the chain. Anonymous tier ≈ **1 request / 15 s per server IP** — beyond that
+it returns **402**. Fine for one dev; useless for real traffic. Production needs
+`GEMINI_API_KEY` (and ideally `GROQ_API_KEY`).
+
 ### 7. Gemini image generation is PAID
 Nano Banana (`gemini-*-image`) returns 429 on a free key. The code tries Gemini,
 then falls through to Pollinations. Pollinations is what actually serves images today.
@@ -222,3 +228,13 @@ Before saying a change works:
 - Comments explain **why**, not what.
 - API routes: `try/catch`, return `{ error: string }` with a real status code.
 - Server-only secrets must never reach a `NEXT_PUBLIC_*` variable.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

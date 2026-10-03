@@ -80,10 +80,23 @@ export const FREE_MODELS = [
     envVar: 'HF_TOKEN',
     url: 'https://huggingface.co/settings/tokens',
   },
+  {
+    // Keyless last resort: keeps captions working when no AI key is set or
+    // every keyed provider is down. Quality is lower, so it's always last.
+    id: 'pollinations-text',
+    label: 'Pollinations',
+    provider: 'pollinations' as const,
+    model: 'openai',
+    badge: 'Free',
+    badgeColor: 'bg-gray-100 text-gray-700',
+    description: 'უფასო, გასაღების გარეშე',
+    envVar: null,
+    url: 'https://pollinations.ai',
+  },
 ] as const
 
 export type ModelId = typeof FREE_MODELS[number]['id']
-export type Provider = 'groq' | 'gemini' | 'huggingface'
+export type Provider = 'groq' | 'gemini' | 'huggingface' | 'pollinations'
 
 export const DEFAULT_MODEL_ID: ModelId = 'gemini-flash-2'
 
@@ -105,6 +118,7 @@ function dispatch(config: typeof FREE_MODELS[number], opts: CallOptions): Promis
     case 'groq':        return callGroq(config.model, opts)
     case 'gemini':      return callGemini(config.model, opts)
     case 'huggingface': return callHuggingFace(config.model, opts)
+    case 'pollinations': return callPollinations(config.model, opts)
     default:            throw new Error('Unknown provider')
   }
 }
@@ -127,7 +141,7 @@ export async function callAI(modelId: string, opts: CallOptions): Promise<string
     FREE_MODELS.find(m => m.id === modelId) ??
     FREE_MODELS.find(m => m.id === DEFAULT_MODEL_ID)!
 
-  const hasKey = (m: typeof FREE_MODELS[number]) => !!process.env[m.envVar]
+  const hasKey = (m: typeof FREE_MODELS[number]) => m.envVar === null || !!process.env[m.envVar]
 
   // Primary first, then one model per other provider that has a key configured.
   const chain = [primary]
@@ -135,8 +149,11 @@ export async function callAI(modelId: string, opts: CallOptions): Promise<string
     if (m.id === primary.id) continue
     if (!hasKey(m)) continue
     if (chain.some(c => c.provider === m.provider)) continue
+    if (m.provider === 'pollinations') continue // appended last, below
     chain.push(m)
   }
+  const keyless = FREE_MODELS.find(m => m.provider === 'pollinations')!
+  if (!chain.includes(keyless)) chain.push(keyless)
 
   let lastErr: unknown = new Error('No AI provider configured')
 
@@ -247,6 +264,27 @@ async function callHuggingFace(model: string, opts: CallOptions): Promise<string
     }
   }
   throw new Error(`HuggingFace failed: ${lastError}`)
+}
+
+// ── Pollinations (keyless) ────────────────────────────────────────────
+
+async function callPollinations(model: string, opts: CallOptions): Promise<string> {
+  const res = await fetch('https://text.pollinations.ai/openai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: opts.messages,
+      temperature: opts.temperature ?? 0.7,
+      max_tokens: opts.max_tokens ?? 500,
+    }),
+    signal: AbortSignal.timeout(45000),
+  })
+  if (!res.ok) throw new Error(`Pollinations error ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  const data = await res.json()
+  // Its default model is a reasoning model too; never return the reasoning
+  // trace as a caption — empty content means fail over / error instead.
+  return data?.choices?.[0]?.message?.content?.trim() ?? ''
 }
 
 // ── Legacy compat (used by existing API routes) ───────────────────────
