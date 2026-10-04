@@ -1,10 +1,18 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Sparkles, Mail, Lock, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Mail, Loader2, MailCheck } from 'lucide-react'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase'
+import { callbackUrl, friendlyAuthError, passwordIsValid, safeNext } from '@/lib/auth'
+import { Alert, AuthShell, PasswordField, PasswordRules, SubmitButton, inputClass } from '@/components/auth/AuthUI'
+
+// Google sign-in needs a Google Cloud OAuth client configured in Supabase.
+// Until then the button would only lead to a raw "provider not enabled" error.
+const GOOGLE_ENABLED = process.env.NEXT_PUBLIC_GOOGLE_AUTH === '1'
+
+const RESEND_COOLDOWN_S = 60
 
 // lucide has no Google mark (its `Chrome` icon is the browser logo), so the
 // official multicolour "G" is inlined.
@@ -19,129 +27,218 @@ function GoogleLogo() {
   )
 }
 
-// /auth/callback sends people here with ?verified=1 when the email link was
-// opened in a different browser/profile: Supabase already confirmed the
-// address, but the PKCE verifier lives in the original browser, so no session
-// could be created here. They just need to sign in with their password.
-// Isolated behind Suspense so useSearchParams doesn't opt the page out of prerendering.
-function VerifiedNotice({ onSignIn }: { onSignIn: () => void }) {
-  const params = useSearchParams()
-  if (params.get('verified') !== '1') return null
-  return (
-    <div className="bg-green-50 border border-green-200 text-green-700 text-xs rounded-lg px-3 py-2 mb-4">
-      Email confirmed. Sign in with your email and password.{' '}
-      <button type="button" onClick={onSignIn} className="font-semibold underline">
-        Sign in
-      </button>
-    </div>
-  )
-}
+type Mode = 'signin' | 'signup'
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
-  const [mode, setMode] = useState<'signin' | 'signup'>('signup')
+  const params = useSearchParams()
+  const next = safeNext(params.get('next'))
+  // ?verified=1: email link opened in another browser — confirmed, but no session here.
+  const verified = params.get('verified') === '1'
+
+  const [mode, setMode] = useState<Mode>(() => {
+    const m = params.get('mode')
+    if (m === 'signin' || m === 'signup') return m
+    return verified || params.has('next') ? 'signin' : 'signup'
+  })
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [showPass, setShowPass] = useState(false)
+  const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  const [error, setError] = useState<{ code: string; message: string } | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
+  // After sign-up we swap the form for a "check your email" screen.
+  const [sentTo, setSentTo] = useState<string | null>(null)
+  const [cooldown, setCooldown] = useState(0)
+  const [resending, setResending] = useState(false)
+
+  // Already signed in → no reason to see this page.
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+    getSupabase().auth.getSession().then(({ data }) => {
+      if (data.session) router.replace(next)
+    })
+  }, [router, next])
+
+  useEffect(() => {
+    if (cooldown <= 0) return
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [cooldown])
+
+  const switchMode = (m: Mode) => {
+    setMode(m)
+    setError(null)
+    setInfo(null)
+    setConfirm('')
+  }
+
+  const passwordsMatch = password === confirm
+  const signupBlocked = mode === 'signup' && (!passwordIsValid(password) || !passwordsMatch)
+
+  const resendConfirmation = async (to: string) => {
+    setResending(true)
+    setError(null)
+    setInfo(null)
+    try {
+      const { error } = await getSupabase().auth.resend({
+        type: 'signup',
+        email: to,
+        options: { emailRedirectTo: callbackUrl(next) },
+      })
+      if (error) throw error
+      setInfo(`We sent a new confirmation link to ${to}.`)
+      setCooldown(RESEND_COOLDOWN_S)
+    } catch (err) {
+      setError(friendlyAuthError(err))
+    } finally {
+      setResending(false)
+    }
+  }
 
   const handleGoogle = async () => {
-    if (!isSupabaseConfigured()) { setError('Auth not configured — add Supabase keys to .env.local'); return }
     setGoogleLoading(true)
     setError(null)
-    try {
-      await getSupabase().auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: `${window.location.origin}/auth/callback?next=/tool` },
-      })
-    } catch {
-      setError('Google sign-in failed. Try again.')
+    const { error } = await getSupabase().auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: callbackUrl(next) },
+    })
+    // On success the browser navigates away; only failures land here.
+    if (error) {
+      setError(friendlyAuthError(error))
       setGoogleLoading(false)
     }
   }
 
-  const handleEmail = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!isSupabaseConfigured()) { setError('Auth not configured — add Supabase keys to .env.local'); return }
+    if (!isSupabaseConfigured()) {
+      setError({ code: '', message: 'Sign-in is not configured on this deployment.' })
+      return
+    }
+    if (signupBlocked) return
     setLoading(true)
     setError(null)
-    setSuccess(null)
+    setInfo(null)
+    const addr = email.trim()
     try {
       if (mode === 'signup') {
         const { data, error } = await getSupabase().auth.signUp({
-          email, password,
-          options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/tool` },
+          email: addr,
+          password,
+          options: { emailRedirectTo: callbackUrl(next) },
         })
         if (error) throw error
         // For an already-registered address Supabase returns a fake success
         // (no email is sent, to avoid revealing which emails exist) with an
-        // empty `identities` list. Say so instead of "check your email".
+        // empty `identities` list.
         if (data.user && data.user.identities?.length === 0) {
-          setMode('signin')
-          setError('An account with this email already exists. Sign in with your password.')
+          switchMode('signin')
+          setError({ code: 'user_already_exists', message: 'An account with this email already exists. Sign in, or reset your password if you forgot it.' })
           return
         }
-        setSuccess('Check your email — click the confirmation link to activate your account.')
+        // Email confirmation off → Supabase signs the user in straight away.
+        if (data.session) {
+          router.replace(next)
+          return
+        }
+        setSentTo(addr)
+        setCooldown(RESEND_COOLDOWN_S)
       } else {
-        const { error } = await getSupabase().auth.signInWithPassword({ email, password })
+        const { error } = await getSupabase().auth.signInWithPassword({ email: addr, password })
         if (error) throw error
-        router.push('/tool')
-        router.refresh() // re-run server components with the new session
+        router.replace(next)
       }
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Authentication failed')
+    } catch (err) {
+      setError(friendlyAuthError(err))
     } finally {
       setLoading(false)
     }
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-fuchsia-50 flex flex-col items-center justify-center px-4 py-12">
-      {/* Logo */}
-      <Link href="/" className="flex items-center gap-2 mb-8 group">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-200 group-hover:shadow-violet-300 transition-shadow">
-          <Sparkles size={18} className="text-white" />
+  // ── "Check your email" screen ─────────────────────────────────────
+  if (sentTo) {
+    return (
+      <div className="text-center">
+        <div className="w-14 h-14 rounded-full bg-violet-50 flex items-center justify-center mx-auto mb-4">
+          <MailCheck size={26} className="text-violet-600" />
         </div>
-        <span className="font-extrabold text-gray-900 text-xl">
-          PostCraft<span className="text-violet-600"> AI</span>
-        </span>
-      </Link>
+        <h1 className="text-xl font-extrabold text-gray-900 mb-2">Check your email</h1>
+        <p className="text-sm text-gray-500 mb-1">We sent a confirmation link to</p>
+        <p className="text-sm font-semibold text-gray-900 mb-4 break-all">{sentTo}</p>
+        <p className="text-xs text-gray-400 mb-6">
+          Open the link <strong>in this same browser</strong> to finish signing in.
+          Not there? Check spam or promotions.
+        </p>
 
-      <div className="w-full max-w-sm">
-        {/* Card */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-xl shadow-gray-100/60 p-8">
-          {/* Tabs */}
-          <div className="flex bg-gray-100 rounded-xl p-1 mb-6">
-            {(['signup', 'signin'] as const).map(m => (
-              <button
-                key={m}
-                onClick={() => { setMode(m); setError(null); setSuccess(null) }}
-                className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
-                  mode === m ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {m === 'signup' ? 'Get Started' : 'Sign In'}
-              </button>
-            ))}
-          </div>
+        <div className="space-y-3 text-left">
+          {info && <Alert tone="success">{info}</Alert>}
+          {error && <Alert tone="error">{error.message}</Alert>}
+        </div>
 
-          <Suspense fallback={null}>
-            <VerifiedNotice onSignIn={() => { setMode('signin'); setError(null); setSuccess(null) }} />
-          </Suspense>
+        <button
+          type="button"
+          onClick={() => resendConfirmation(sentTo)}
+          disabled={cooldown > 0 || resending}
+          className="w-full mt-4 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-gray-200 text-sm font-semibold text-gray-700 hover:border-violet-300 hover:bg-violet-50 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+        >
+          {resending && <Loader2 size={15} className="animate-spin" />}
+          {cooldown > 0 ? `Resend email in ${cooldown}s` : 'Resend email'}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setSentTo(null); setInfo(null); setError(null); setPassword(''); setConfirm('') }}
+          className="block w-full mt-3 text-xs text-gray-500 hover:text-violet-600"
+        >
+          Wrong email? Use a different one
+        </button>
+        <button
+          type="button"
+          onClick={() => { setSentTo(null); switchMode('signin') }}
+          className="block w-full mt-2 text-xs text-gray-500 hover:text-violet-600"
+        >
+          Already confirmed? Sign in
+        </button>
+      </div>
+    )
+  }
 
-          <h1 className="text-xl font-extrabold text-gray-900 mb-1">
-            {mode === 'signup' ? 'Create your free account' : 'Welcome back'}
-          </h1>
-          <p className="text-sm text-gray-500 mb-6">
-            {mode === 'signup'
-              ? '5 free generations per day. No credit card.'
-              : 'Continue creating scroll-stopping content.'}
-          </p>
+  // ── Sign in / sign up form ────────────────────────────────────────
+  return (
+    <>
+      <div className="flex bg-gray-100 rounded-xl p-1 mb-6" role="tablist">
+        {(['signup', 'signin'] as const).map(m => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === m}
+            onClick={() => switchMode(m)}
+            className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
+              mode === m ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {m === 'signup' ? 'Create account' : 'Sign in'}
+          </button>
+        ))}
+      </div>
 
-          {/* Google */}
+      {verified && mode === 'signin' && (
+        <div className="mb-4"><Alert tone="success">Email confirmed. Sign in with your email and password.</Alert></div>
+      )}
+
+      <h1 className="text-xl font-extrabold text-gray-900 mb-1">
+        {mode === 'signup' ? 'Create your free account' : 'Welcome back'}
+      </h1>
+      <p className="text-sm text-gray-500 mb-6">
+        {mode === 'signup'
+          ? '5 free generations per day. No credit card.'
+          : 'Sign in to keep creating.'}
+      </p>
+
+      {GOOGLE_ENABLED && (
+        <>
           <button
             type="button"
             onClick={handleGoogle}
@@ -151,77 +248,120 @@ export default function LoginPage() {
             {googleLoading ? <Loader2 size={16} className="animate-spin" /> : <GoogleLogo />}
             Continue with Google
           </button>
-
-          {/* Divider */}
           <div className="flex items-center gap-3 mb-4">
             <div className="flex-1 h-px bg-gray-200" />
             <span className="text-xs text-gray-400 font-medium">or use email</span>
             <div className="flex-1 h-px bg-gray-200" />
           </div>
+        </>
+      )}
 
-          {/* Email form */}
-          <form onSubmit={handleEmail} className="space-y-3">
-            <div className="relative">
-              <Mail size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                required
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-300 transition-all"
-              />
-            </div>
-            <div className="relative">
-              <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                required
-                type={showPass ? 'text' : 'password'}
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder={mode === 'signup' ? 'Create a password (6+ chars)' : 'Your password'}
-                minLength={6}
-                className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-300 transition-all"
-              />
-              <button type="button" onClick={() => setShowPass(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
-
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-3 py-2">{error}</div>
-            )}
-            {success && (
-              <div className="bg-green-50 border border-green-200 text-green-700 text-xs rounded-lg px-3 py-2">{success}</div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white font-bold text-sm hover:opacity-90 disabled:opacity-60 transition-all shadow-md shadow-violet-200"
-            >
-              {loading && <Loader2 size={15} className="animate-spin" />}
-              {mode === 'signup' ? 'Create Account' : 'Sign In'}
-            </button>
-          </form>
-
-          {mode === 'signin' && (
-            <p className="text-center text-xs text-gray-400 mt-4">
-              Don&apos;t have an account?{' '}
-              <button onClick={() => setMode('signup')} className="text-violet-600 font-semibold hover:underline">
-                Sign up free
-              </button>
-            </p>
-          )}
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="relative">
+          <Mail size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            id="email"
+            required
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            autoComplete="email"
+            className={inputClass}
+          />
         </div>
 
-        <p className="text-center text-xs text-gray-400 mt-5">
-          By continuing you agree to our{' '}
-          <Link href="/terms" className="underline hover:text-gray-600">Terms</Link>
-          {' '}&amp;{' '}
-          <Link href="/privacy" className="underline hover:text-gray-600">Privacy Policy</Link>
-        </p>
-      </div>
-    </div>
+        <PasswordField
+          id="password"
+          value={password}
+          onChange={setPassword}
+          placeholder={mode === 'signup' ? 'Create a password' : 'Your password'}
+          autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+        />
+
+        {mode === 'signup' && (
+          <>
+            <PasswordRules password={password} />
+            <PasswordField
+              id="confirm"
+              value={confirm}
+              onChange={setConfirm}
+              placeholder="Repeat password"
+              autoComplete="new-password"
+              invalid={confirm.length > 0 && !passwordsMatch}
+            />
+            {confirm.length > 0 && !passwordsMatch && (
+              <p className="text-xs text-red-500">Passwords don&apos;t match.</p>
+            )}
+          </>
+        )}
+
+        {mode === 'signin' && (
+          <div className="text-right -mt-1">
+            <Link
+              href={`/forgot-password${email ? `?email=${encodeURIComponent(email.trim())}` : ''}`}
+              className="text-xs font-semibold text-violet-600 hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
+        )}
+
+        {error && (
+          <Alert tone="error">
+            {error.message}
+            {error.code === 'email_not_confirmed' && email && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  onClick={() => resendConfirmation(email.trim())}
+                  disabled={resending || cooldown > 0}
+                  className="font-semibold underline disabled:opacity-60"
+                >
+                  {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend confirmation email'}
+                </button>
+              </>
+            )}
+            {error.code === 'invalid_credentials' && (
+              <>
+                {' '}
+                <Link href={`/forgot-password?email=${encodeURIComponent(email.trim())}`} className="font-semibold underline">
+                  Reset your password
+                </Link>
+              </>
+            )}
+          </Alert>
+        )}
+        {info && <Alert tone="success">{info}</Alert>}
+
+        <SubmitButton loading={loading} disabled={signupBlocked}>
+          {mode === 'signup' ? 'Create account' : 'Sign in'}
+        </SubmitButton>
+      </form>
+
+      <p className="text-center text-xs text-gray-400 mt-4">
+        {mode === 'signin' ? (
+          <>Don&apos;t have an account?{' '}
+            <button type="button" onClick={() => switchMode('signup')} className="text-violet-600 font-semibold hover:underline">Create one free</button>
+          </>
+        ) : (
+          <>Already have an account?{' '}
+            <button type="button" onClick={() => switchMode('signin')} className="text-violet-600 font-semibold hover:underline">Sign in</button>
+          </>
+        )}
+      </p>
+    </>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <AuthShell>
+      {/* useSearchParams needs a Suspense boundary to keep the shell prerendered. */}
+      <Suspense fallback={<div className="h-80 flex items-center justify-center"><Loader2 className="animate-spin text-violet-400" /></div>}>
+        <LoginForm />
+      </Suspense>
+    </AuthShell>
   )
 }

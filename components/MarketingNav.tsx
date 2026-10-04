@@ -93,11 +93,11 @@ export default function MarketingNav() {
             </>
           ) : (
             <>
-              <Link href="/login" className="text-sm font-medium text-gray-600 hover:text-violet-600 transition-colors">
+              <Link href="/login?mode=signin" className="text-sm font-medium text-gray-600 hover:text-violet-600 transition-colors">
                 Sign In
               </Link>
               <Link
-                href="/login"
+                href="/login?mode=signup"
                 className="flex items-center gap-1.5 text-sm px-4 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white font-semibold hover:opacity-90 transition-all shadow-md hover:shadow-violet-200"
               >
                 <Zap size={14} className="text-yellow-300" />
@@ -151,14 +151,14 @@ export default function MarketingNav() {
           ) : (
             <>
               <Link
-                href="/login"
+                href="/login?mode=signin"
                 onClick={() => setOpen(false)}
                 className="block px-3 py-2 rounded-lg text-sm font-medium text-gray-700 hover:bg-violet-50 hover:text-violet-600"
               >
                 Sign In
               </Link>
               <Link
-                href="/login"
+                href="/login?mode=signup"
                 onClick={() => setOpen(false)}
                 className="flex items-center justify-center gap-2 mt-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white font-semibold text-sm"
               >
