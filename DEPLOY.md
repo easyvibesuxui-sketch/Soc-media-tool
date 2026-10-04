@@ -80,7 +80,7 @@ Without these, Google sign-in and email confirmation links bounce to `localhost:
 
 **Google sign-in** → Authentication → Providers → Google: needs a Client ID +
 Secret from Google Cloud Console (OAuth client, type *Web*), with the authorised
-redirect URI `https://xiynijihohlxqvkfzblr.supabase.co/auth/v1/callback`.
+redirect URI `https://dppbsfngrlavgcbmqmgu.supabase.co/auth/v1/callback`.
 Email/password works without this.
 
 > ### The Supabase vars are not optional in production

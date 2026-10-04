@@ -1,4 +1,4 @@
--- Applied to project xiynijihohlxqvkfzblr (postcraft-ai, eu-central-1).
+-- Applied to project dppbsfngrlavgcbmqmgu (postcraft-ai, eu-central-1).
 
 -- Per-user plan + daily usage. Clients may read their own row but never write
 -- it directly (is_paid must not be self-settable).
