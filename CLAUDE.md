@@ -29,7 +29,7 @@ app/
   blog/page.tsx         Blog index (reads lib/blog.ts)
   blog/[slug]/page.tsx  Post — fetches AI-generated body at runtime
   about|contact|privacy|terms/   AdSense-required pages
-  auth/callback/route.ts  OAuth code exchange + user upsert
+  auth/callback/page.tsx  CLIENT-side PKCE code exchange (must stay client-side)
   auth/error/page.tsx
   sitemap.ts, robots.ts   SEO (use NEXT_PUBLIC_SITE_URL)
   api/
@@ -39,7 +39,6 @@ app/
     generate-suggestions/
     generate-video/
     generate-blog/       PUBLIC (crawlers need it) + cached
-    check-limit/         legacy, superseded by lib/api-guard.ts
     webhook/lemonsqueezy/
 lib/
   groq.ts        Model registry + callAI() with retry/failover. Core AI entry point.
@@ -103,6 +102,12 @@ Prefer Gemini's `*-latest` aliases so Google's next retirement doesn't break us.
 default effort. `callGroq` sends `reasoning_effort: 'low'` and falls back to the
 `reasoning` field. Don't remove either.
 
+### 6b. Pollinations text is a keyless last resort, not a provider to rely on
+`callAI()` always appends `pollinations-text` (text.pollinations.ai, no key) at the
+end of the chain. Anonymous tier ≈ **1 request / 15 s per server IP** — beyond that
+it returns **402**. Fine for one dev; useless for real traffic. Production needs
+`GEMINI_API_KEY` (and ideally `GROQ_API_KEY`).
+
 ### 7. Gemini image generation is PAID
 Nano Banana (`gemini-*-image`) returns 429 on a free key. The code tries Gemini,
 then falls through to Pollinations. Pollinations is what actually serves images today.
@@ -134,7 +139,7 @@ HF_TOKEN=               # failover
 # Auth — REQUIRED IN PRODUCTION (without these the AI routes return 503)
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_SERVICE_ROLE_KEY=   # only the LemonSqueezy webhook needs it
 
 # SEO — sitemap / robots / canonical
 NEXT_PUBLIC_SITE_URL=https://your-domain.com
@@ -149,7 +154,34 @@ NEXT_PUBLIC_LEMONSQUEEZY_CHECKOUT_URL=
 **Never commit `.env.local`.** It is gitignored. Do not paste key values into
 code, docs, commit messages or chat.
 
-### Supabase `users` table
+### Supabase
+
+Project **`postcraft-ai`** (ref `dppbsfngrlavgcbmqmgu`, eu-central-1, free plan, org "Nathan"). Standalone project — shares nothing with other projects in the org; never touch those..
+URL + publishable key are committed in `.env.production` (public by design).
+Schema lives in `supabase/migrations/` — add new SQL there and apply it.
+
+- RLS on `users`: clients can only SELECT their own row; no client writes.
+- Trigger `on_auth_user_created` inserts the `users` row at sign-up.
+- `increment_my_usage()` (SECURITY DEFINER, callable by `authenticated`) is the
+  only write path; it can only raise the caller's own counter.
+- So the guard runs as the caller (`createUserClient(token)`) and AI routes need
+  **no service-role key**.
+- Auth uses **PKCE** (`flowType: 'pkce'` in `getSupabase()`); the exchange happens
+  in the browser at `/auth/callback`, because the verifier and the session both
+  live in browser storage. A server route can't do it — that's why the old one never worked.
+
+### Hosting — Vercel (live)
+
+Production: **https://postcraft-ai-alpha.vercel.app** (also reachable at postcraft-ai-easyvibesuxui-sketchs-projects.vercel.app)
+Vercel project `postcraft-ai` (team `easyvibesuxui-sketchs-projects`), functions in
+`fra1` next to Supabase. Vercel Authentication is on for previews only.
+
+Linked to GitHub `easyvibesuxui-sketch/Soc-media-tool`: **every push to `main` deploys
+to production**, other branches get protected preview URLs. Env vars set in Vercel:
+`GEMINI_API_KEY` (sensitive), `NEXT_PUBLIC_SITE_URL`. The Cloudflare setup in DEPLOY.md
+is kept but unused.
+
+#### `users` table
 `id` (uuid, PK) · `email` (text) · `is_paid` (bool) · `daily_count` (int)
 · `last_reset` (date) · `created_at` (timestamp)
 
@@ -181,11 +213,21 @@ Before saying a change works:
 
 ## Known gaps / TODO
 
-- Supabase keys empty → login non-functional, AI routes 503 in production
+- Google sign-in not configured (needs a Google Cloud OAuth client). Email/password
+  works; Site URL + redirect URLs are set in Supabase.
+- Supabase built-in email sends ~2/hour on the free plan — add custom SMTP (e.g.
+  Resend) before real sign-up traffic.
 - Contact form is simulated (`setSent(true)`), sends nothing — needs Resend/Formspree
 - No GA4, no AdSense script tag yet
-- `app/api/check-limit/route.ts` is superseded by `lib/api-guard.ts` — trusts a
-  client-supplied `userId`. Delete or rewrite; don't build on it.
+- **Usage is only counted for images.** `generate-caption`, `generate-hashtags`,
+  `generate-suggestions` and `generate-video` import `recordUsage` but never call it,
+  so the daily limit only bites on images. Decide what one "generation" means
+  (one image? one full post?) before wiring it — one post = 4 images + caption +
+  hashtags + description, so counting every call burns 5/day in a single post.
+- LemonSqueezy webhook: `listUsers()` only returns the first page (50 users), and
+  the signature compare isn't constant-time.
+- `npm audit` shows 7 high (braces, via tailwindcss 3 build tooling only — not
+  shipped to the runtime).
 - Pricing page advertises a $29 Pro tier with no checkout wired up
 - Landing page stats ("50k+ posts", testimonials) are placeholder copy, not real
 - `_unused-components/` can be deleted
@@ -199,3 +241,13 @@ Before saying a change works:
 - Comments explain **why**, not what.
 - API routes: `try/catch`, return `{ error: string }` with a real status code.
 - Server-only secrets must never reach a `NEXT_PUBLIC_*` variable.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

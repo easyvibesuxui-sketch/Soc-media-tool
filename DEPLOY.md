@@ -64,23 +64,35 @@ Mark everything except `NEXT_PUBLIC_SITE_URL` as **Secret** (encrypted).
 | `GEMINI_API_KEY` | **yes** | Primary AI. Blog + captions need it. |
 | `GROQ_API_KEY` | recommended | Text failover |
 | `HF_TOKEN` | optional | Further failover |
-| `NEXT_PUBLIC_SUPABASE_URL` | **yes** | |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **yes** | |
-| `SUPABASE_SERVICE_ROLE_KEY` | **yes** | Server-only. Never expose. |
+| `NEXT_PUBLIC_SUPABASE_URL` | already set | Committed in `.env.production` (build-time, public) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | already set | Publishable key, committed in `.env.production` |
+| `SUPABASE_SERVICE_ROLE_KEY` | no | Only for the LemonSqueezy webhook. Server-only. Never expose. |
 | `NEXT_PUBLIC_SITE_URL` | **yes** | Real domain, e.g. `https://postcraft.ai`. Plain var, not secret. |
 | `LEMONSQUEEZY_*` | no | Unused so far |
+
+## Supabase Auth settings (one-time, in the Supabase dashboard)
+
+Project `postcraft-ai` → **Authentication → URL Configuration**:
+- **Site URL**: the deployed URL (e.g. `https://postcraft-ai.<sub>.workers.dev`)
+- **Redirect URLs**: `https://<that-host>/auth/callback` and `http://localhost:3000/auth/callback`
+
+Without these, Google sign-in and email confirmation links bounce to `localhost:3000`.
+
+**Google sign-in** → Authentication → Providers → Google: needs a Client ID +
+Secret from Google Cloud Console (OAuth client, type *Web*), with the authorised
+redirect URI `https://dppbsfngrlavgcbmqmgu.supabase.co/auth/v1/callback`.
+Email/password works without this.
 
 > ### The Supabase vars are not optional in production
 > `lib/api-guard.ts` **fails closed**: if they're missing and `NODE_ENV=production`,
 > every AI route returns **503**. That is deliberate — missing config must not
 > leave the API keys open to the internet.
 >
-> **If the deployed site returns 503 on generation, these three vars are the cause.**
+> **If the deployed site returns 503 on generation, the two `NEXT_PUBLIC_SUPABASE_*` vars are missing from the build.**
 
 CLI alternative:
 ```bash
 npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 # ...etc
 ```
 
