@@ -172,7 +172,7 @@ Schema lives in `supabase/migrations/` — add new SQL there and apply it.
 
 ### Hosting — Vercel (live)
 
-Production: **https://postcraft-ai-easyvibesuxui-sketchs-projects.vercel.app**
+Production: **https://postcraft-ai-alpha.vercel.app** (also reachable at postcraft-ai-easyvibesuxui-sketchs-projects.vercel.app)
 Vercel project `postcraft-ai` (team `easyvibesuxui-sketchs-projects`), functions in
 `fra1` next to Supabase. Vercel Authentication is on for previews only.
 
