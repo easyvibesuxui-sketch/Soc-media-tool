@@ -156,7 +156,7 @@ code, docs, commit messages or chat.
 
 ### Supabase
 
-Project **`postcraft-ai`** (ref `dppbsfngrlavgcbmqmgu`, eu-central-1, free plan, org "Nathan" — same account as the UX-audit project).
+Project **`postcraft-ai`** (ref `dppbsfngrlavgcbmqmgu`, eu-central-1, free plan, org "Nathan"). Standalone project — shares nothing with other projects in the org; never touch those..
 URL + publishable key are committed in `.env.production` (public by design).
 Schema lives in `supabase/migrations/` — add new SQL there and apply it.
 
