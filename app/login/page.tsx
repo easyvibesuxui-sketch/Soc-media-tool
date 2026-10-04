@@ -71,11 +71,19 @@ export default function LoginPage() {
     setSuccess(null)
     try {
       if (mode === 'signup') {
-        const { error } = await getSupabase().auth.signUp({
+        const { data, error } = await getSupabase().auth.signUp({
           email, password,
           options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/tool` },
         })
         if (error) throw error
+        // For an already-registered address Supabase returns a fake success
+        // (no email is sent, to avoid revealing which emails exist) with an
+        // empty `identities` list. Say so instead of "check your email".
+        if (data.user && data.user.identities?.length === 0) {
+          setMode('signin')
+          setError('An account with this email already exists. Sign in with your password.')
+          return
+        }
         setSuccess('Check your email — click the confirmation link to activate your account.')
       } else {
         const { error } = await getSupabase().auth.signInWithPassword({ email, password })
