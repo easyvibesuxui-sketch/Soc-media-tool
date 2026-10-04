@@ -170,6 +170,19 @@ Schema lives in `supabase/migrations/` — add new SQL there and apply it.
   in the browser at `/auth/callback`, because the verifier and the session both
   live in browser storage. A server route can't do it — that's why the old one never worked.
 
+### Hosting — Vercel (live)
+
+Production: **https://postcraft-ai-easyvibesuxui-sketchs-projects.vercel.app**
+Vercel project `postcraft-ai` (team `easyvibesuxui-sketchs-projects`), functions in
+`fra1` next to Supabase. Vercel Authentication is on for previews only.
+
+The Vercel GitHub app is **not** installed on this repo, so pushes do NOT auto-deploy.
+Deploy via the Vercel MCP `create_deployment` with `gitSource`
+`{type: github, org: easyvibesuxui-sketch, repo: Soc-media-tool, ref: <branch>}`
+(works because the repo is public). Env: `NEXT_PUBLIC_SITE_URL` set; `GEMINI_API_KEY`
+still missing (text falls back to keyless Pollinations). The Cloudflare setup in
+DEPLOY.md is kept but unused.
+
 #### `users` table
 `id` (uuid, PK) · `email` (text) · `is_paid` (bool) · `daily_count` (int)
 · `last_reset` (date) · `created_at` (timestamp)
