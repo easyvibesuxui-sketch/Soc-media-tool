@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Sparkles, Mail, Lock, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase'
 
@@ -16,6 +16,24 @@ function GoogleLogo() {
       <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z" />
       <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z" />
     </svg>
+  )
+}
+
+// /auth/callback sends people here with ?verified=1 when the email link was
+// opened in a different browser/profile: Supabase already confirmed the
+// address, but the PKCE verifier lives in the original browser, so no session
+// could be created here. They just need to sign in with their password.
+// Isolated behind Suspense so useSearchParams doesn't opt the page out of prerendering.
+function VerifiedNotice({ onSignIn }: { onSignIn: () => void }) {
+  const params = useSearchParams()
+  if (params.get('verified') !== '1') return null
+  return (
+    <div className="bg-green-50 border border-green-200 text-green-700 text-xs rounded-lg px-3 py-2 mb-4">
+      Email confirmed. Sign in with your email and password.{' '}
+      <button type="button" onClick={onSignIn} className="font-semibold underline">
+        Sign in
+      </button>
+    </div>
   )
 }
 
@@ -101,6 +119,10 @@ export default function LoginPage() {
               </button>
             ))}
           </div>
+
+          <Suspense fallback={null}>
+            <VerifiedNotice onSignIn={() => { setMode('signin'); setError(null); setSuccess(null) }} />
+          </Suspense>
 
           <h1 className="text-xl font-extrabold text-gray-900 mb-1">
             {mode === 'signup' ? 'Create your free account' : 'Welcome back'}

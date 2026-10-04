@@ -29,7 +29,12 @@ function Callback() {
     }
 
     getSupabase().auth.exchangeCodeForSession(code).then(({ error }) => {
-      router.replace(error ? '/auth/error' : next)
+      // Getting a `code` means Supabase already verified the link (expired or
+      // reused links come back as ?error= with no code). A failed exchange then
+      // almost always means the link was opened in another browser/profile that
+      // lacks the PKCE verifier — the email is confirmed, so ask them to sign in
+      // rather than showing a scary "authentication failed".
+      router.replace(error ? '/login?verified=1' : next)
     })
   }, [params, router])
 
