@@ -176,12 +176,10 @@ Production: **https://postcraft-ai-alpha.vercel.app** (also reachable at postcra
 Vercel project `postcraft-ai` (team `easyvibesuxui-sketchs-projects`), functions in
 `fra1` next to Supabase. Vercel Authentication is on for previews only.
 
-The Vercel GitHub app is **not** installed on this repo, so pushes do NOT auto-deploy.
-Deploy via the Vercel MCP `create_deployment` with `gitSource`
-`{type: github, org: easyvibesuxui-sketch, repo: Soc-media-tool, ref: <branch>}`
-(works because the repo is public). Env: `NEXT_PUBLIC_SITE_URL` set; `GEMINI_API_KEY`
-still missing (text falls back to keyless Pollinations). The Cloudflare setup in
-DEPLOY.md is kept but unused.
+Linked to GitHub `easyvibesuxui-sketch/Soc-media-tool`: **every push to `main` deploys
+to production**, other branches get protected preview URLs. Env vars set in Vercel:
+`GEMINI_API_KEY` (sensitive), `NEXT_PUBLIC_SITE_URL`. The Cloudflare setup in DEPLOY.md
+is kept but unused.
 
 #### `users` table
 `id` (uuid, PK) · `email` (text) · `is_paid` (bool) · `daily_count` (int)
@@ -215,8 +213,10 @@ Before saying a change works:
 
 ## Known gaps / TODO
 
-- Supabase Auth dashboard settings not done yet: Site URL + redirect URLs, Google
-  provider (needs Google Cloud OAuth client). See DEPLOY.md.
+- Google sign-in not configured (needs a Google Cloud OAuth client). Email/password
+  works; Site URL + redirect URLs are set in Supabase.
+- Supabase built-in email sends ~2/hour on the free plan — add custom SMTP (e.g.
+  Resend) before real sign-up traffic.
 - Contact form is simulated (`setSent(true)`), sends nothing — needs Resend/Formspree
 - No GA4, no AdSense script tag yet
 - **Usage is only counted for images.** `generate-caption`, `generate-hashtags`,
