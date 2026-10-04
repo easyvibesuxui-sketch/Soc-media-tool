@@ -24,12 +24,19 @@ for example Next rejects non-standard exports from a `page.tsx`. Run the build.
 ```
 app/
   page.tsx              Landing (marketing). CTAs → /login
-  login/page.tsx        Sign in/up: Google OAuth + email/password
+  login/page.tsx        Sign in / create account (+confirm password, resend confirmation,
+                        "check your email" screen). Google button hidden unless
+                        NEXT_PUBLIC_GOOGLE_AUTH=1 (provider not configured yet)
+  forgot-password/      Request reset link (neutral wording, resend w/ cooldown)
+  reset-password/       Set new password; needs the recovery session from the callback
   tool/page.tsx         THE PRODUCT — 4-step wizard, client-side auth guard
   blog/page.tsx         Blog index (reads lib/blog.ts)
   blog/[slug]/page.tsx  Post — fetches AI-generated body at runtime
   about|contact|privacy|terms/   AdSense-required pages
-  auth/callback/page.tsx  CLIENT-side PKCE code exchange (must stay client-side)
+  auth/callback/page.tsx  CLIENT-side PKCE code exchange (must stay client-side).
+                          Routes failures: expired link → /auth/error or
+                          /forgot-password?reason=expired; other-browser link →
+                          /login?verified=1 (sign-up) or /forgot-password?reason=browser (reset)
   auth/error/page.tsx
   sitemap.ts, robots.ts   SEO (use NEXT_PUBLIC_SITE_URL)
   api/
@@ -40,7 +47,9 @@ app/
     generate-video/
     generate-blog/       PUBLIC (crawlers need it) + cached
     webhook/lemonsqueezy/
+components/auth/AuthUI.tsx  AuthShell, PasswordField, PasswordRules, Alert — shared by auth pages
 lib/
+  auth.ts        safeNext(), PASSWORD_RULES, friendlyAuthError() (Supabase error codes → plain text)
   groq.ts        Model registry + callAI() with retry/failover. Core AI entry point.
   api-guard.ts   Server-side auth + daily limit. Guards every AI route.
   blog.ts        BLOG_POSTS — single source of truth (pages AND sitemap import it)
@@ -180,6 +189,17 @@ Linked to GitHub `easyvibesuxui-sketch/Soc-media-tool`: **every push to `main` d
 to production**, other branches get protected preview URLs. Env vars set in Vercel:
 `GEMINI_API_KEY` (sensitive), `NEXT_PUBLIC_SITE_URL`. The Cloudflare setup in DEPLOY.md
 is kept but unused.
+
+#### Auth emails & PKCE — read before touching auth
+- Every emailed link (confirm, reset) only creates a session **in the browser that
+  requested it** (PKCE verifier in localStorage). The callback degrades gracefully
+  when that's not the case — keep that behaviour.
+- Signing up with an existing address returns a fake success with empty
+  `identities` and sends no email; the login page detects that.
+- Free Supabase email ≈ 2/hour **project-wide** — don't burn it in tests; add
+  custom SMTP before launch.
+- Password policy is enforced client-side (8+, letter, number). Supabase's own
+  minimum is still 6; raise it in Auth settings to match if you want it server-side.
 
 #### `users` table
 `id` (uuid, PK) · `email` (text) · `is_paid` (bool) · `daily_count` (int)
