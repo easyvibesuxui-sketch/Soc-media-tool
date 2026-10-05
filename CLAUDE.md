@@ -33,10 +33,11 @@ app/
   blog/page.tsx         Blog index (reads lib/blog.ts)
   blog/[slug]/page.tsx  Post — fetches AI-generated body at runtime
   about|contact|privacy|terms/   AdSense-required pages
-  auth/callback/page.tsx  CLIENT-side PKCE code exchange (must stay client-side).
-                          Routes failures: expired link → /auth/error or
-                          /forgot-password?reason=expired; other-browser link →
-                          /login?verified=1 (sign-up) or /forgot-password?reason=browser (reset)
+  auth/callback/page.tsx  Landing page for emailed links + OAuth. supabase-js turns the URL
+                          into a session on init; the page only waits (getSession) and routes:
+                          recovery → /reset-password, else ?next. Expired link →
+                          /auth/error or /forgot-password?reason=expired. NEVER exchange a
+                          code here a second time (that caused the reset-link loop).
   auth/error/page.tsx
   sitemap.ts, robots.ts   SEO (use NEXT_PUBLIC_SITE_URL)
   api/
@@ -175,9 +176,10 @@ Schema lives in `supabase/migrations/` — add new SQL there and apply it.
   only write path; it can only raise the caller's own counter.
 - So the guard runs as the caller (`createUserClient(token)`) and AI routes need
   **no service-role key**.
-- Auth uses **PKCE** (`flowType: 'pkce'` in `getSupabase()`); the exchange happens
-  in the browser at `/auth/callback`, because the verifier and the session both
-  live in browser storage. A server route can't do it — that's why the old one never worked.
+- Auth uses the **implicit flow** (`flowType: 'implicit'` in `getSupabase()`): emailed
+  links return the session in the URL fragment, so they work in ANY browser/device.
+  PKCE was tried and dropped — it requires opening the link in the requesting
+  browser, and users kept hitting that (plus a double-exchange bug looped resets).
 
 ### Hosting — Vercel (live)
 
@@ -190,10 +192,9 @@ to production**, other branches get protected preview URLs. Env vars set in Verc
 `GEMINI_API_KEY` (sensitive), `NEXT_PUBLIC_SITE_URL`. The Cloudflare setup in DEPLOY.md
 is kept but unused.
 
-#### Auth emails & PKCE — read before touching auth
-- Every emailed link (confirm, reset) only creates a session **in the browser that
-  requested it** (PKCE verifier in localStorage). The callback degrades gracefully
-  when that's not the case — keep that behaviour.
+#### Auth emails — read before touching auth
+- Emailed links (confirm, reset) work in any browser (implicit flow). Old PKCE
+  `?code=` links are still handled by the callback for emails sent before the switch.
 - Signing up with an existing address returns a fake success with empty
   `identities` and sends no email; the login page detects that.
 - Free Supabase email ≈ 2/hour **project-wide** — don't burn it in tests; add

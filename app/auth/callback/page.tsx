@@ -6,48 +6,59 @@ import { Loader2 } from 'lucide-react'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase'
 import { safeNext } from '@/lib/auth'
 
-// The code exchange has to happen in the browser: the PKCE verifier was stored
-// here by signUp / resetPasswordForEmail / signInWithOAuth, and the session must
-// end up here too. A server route can see neither.
+// Landing page for every emailed auth link (confirm sign-up, reset password)
+// and OAuth. supabase-js itself turns the URL into a session while it
+// initialises (detectSessionInUrl) — this page must NOT exchange anything a
+// second time. It used to call exchangeCodeForSession() after the client had
+// already consumed the code, which always failed and bounced people back to
+// "request a new link" in a loop.
 function Callback() {
   const router = useRouter()
   const params = useSearchParams()
   const started = useRef(false)
 
   useEffect(() => {
-    // Strict mode runs effects twice; a code can only be exchanged once.
     if (started.current) return
     started.current = true
 
-    const next = safeNext(params.get('next'))
-    const isReset = next === '/reset-password'
-
-    // Expired / already-used links come back as ?error=…&error_code=… (sometimes
-    // in the hash) with no code.
+    // Read the fragment BEFORE touching the client: it clears the hash once it
+    // has taken the tokens out of it.
     const hash = new URLSearchParams(window.location.hash.slice(1))
-    const errorCode = params.get('error_code') ?? hash.get('error_code')
-    if (errorCode || params.get('error') || hash.get('error')) {
+    const linkType = hash.get('type') ?? params.get('type')
+    const next = safeNext(params.get('next'))
+    const isReset = linkType === 'recovery' || next === '/reset-password'
+
+    // Expired / already-used links come back as error=…&error_code=… (hash or query).
+    if (hash.get('error') || hash.get('error_code') || params.get('error') || params.get('error_code')) {
       router.replace(isReset ? '/forgot-password?reason=expired' : '/auth/error?reason=expired')
       return
     }
 
-    const code = params.get('code')
-    if (!code || !isSupabaseConfigured()) {
+    if (!isSupabaseConfigured()) {
       router.replace('/auth/error')
       return
     }
 
-    getSupabase().auth.exchangeCodeForSession(code).then(({ error }) => {
-      if (!error) {
-        router.replace(next)
+    const sb = getSupabase()
+    const go = () => router.replace(isReset ? '/reset-password' : next)
+
+    // getSession() waits for initialisation, i.e. for the URL to be processed.
+    sb.auth.getSession().then(async ({ data }) => {
+      if (data.session) return go()
+
+      // Links e-mailed before the switch to the implicit flow still carry a
+      // PKCE ?code=. That only works in the browser that requested it.
+      const code = params.get('code')
+      if (code) {
+        const { error } = await sb.auth.exchangeCodeForSession(code)
+        if (!error) return go()
+        // Sign-up links verify the address before redirecting, so the email is
+        // confirmed even though this browser can't finish the sign-in.
+        router.replace(isReset ? '/forgot-password?reason=expired' : '/login?verified=1')
         return
       }
-      // Getting a code means Supabase already verified the link, so a failed
-      // exchange almost always means it was opened in another browser/profile
-      // that lacks the PKCE verifier.
-      // - Sign-up: the email IS confirmed — they just need to sign in.
-      // - Reset: no session means no password change — they need a new link here.
-      router.replace(isReset ? '/forgot-password?reason=browser' : '/login?verified=1')
+
+      router.replace(isReset ? '/forgot-password?reason=expired' : '/auth/error')
     })
   }, [params, router])
 

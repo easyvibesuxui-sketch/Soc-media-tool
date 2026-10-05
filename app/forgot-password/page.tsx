@@ -12,7 +12,7 @@ const RESEND_COOLDOWN_S = 60
 
 function ForgotForm() {
   const params = useSearchParams()
-  // ?reason=browser|expired comes from /auth/callback when a reset link couldn't be used.
+  // ?reason=expired comes from /auth/callback when a reset link couldn't be used.
   const reason = params.get('reason')
   const [email, setEmail] = useState(params.get('email') ?? '')
   const [loading, setLoading] = useState(false)
@@ -55,7 +55,7 @@ function ForgotForm() {
         <p className="text-sm text-gray-500 mb-1">If an account exists for</p>
         <p className="text-sm font-semibold text-gray-900 mb-4 break-all">{sentTo}</p>
         <p className="text-xs text-gray-400 mb-6">
-          you&apos;ll get a link to set a new password. Open it <strong>in this same browser</strong>.
+          you&apos;ll get a link to set a new password. Use the newest email if you requested more than one.
           Check spam if it doesn&apos;t arrive in a minute.
         </p>
         {error && <div className="mb-3 text-left"><Alert tone="error">{error}</Alert></div>}
@@ -88,9 +88,6 @@ function ForgotForm() {
         <ArrowLeft size={13} /> Back to sign in
       </Link>
 
-      {reason === 'browser' && (
-        <div className="mb-4"><Alert tone="info">That reset link was opened in a different browser than the one you requested it from. Request a new link and open it here.</Alert></div>
-      )}
       {reason === 'expired' && (
         <div className="mb-4"><Alert tone="info">That reset link has expired or was already used. Request a new one.</Alert></div>
       )}

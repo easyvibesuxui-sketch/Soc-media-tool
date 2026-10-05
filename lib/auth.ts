@@ -14,7 +14,7 @@ export const PASSWORD_RULES = [
 
 export const passwordIsValid = (p: string) => PASSWORD_RULES.every(r => r.test(p))
 
-/** Where auth emails send people back to. The callback page does the PKCE exchange. */
+/** Where auth emails send people back to. supabase-js reads the session from the URL there. */
 export function callbackUrl(next: string): string {
   return `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`
 }

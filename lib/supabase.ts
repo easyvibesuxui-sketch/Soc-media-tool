@@ -14,10 +14,13 @@ export function getSupabase() {
     throw new Error('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local')
   }
   if (!_supabase) {
-    // PKCE: OAuth / email links come back as `?code=`, which /auth/callback
-    // exchanges in the browser (the verifier lives in this browser's storage).
+    // Implicit flow: emailed links (confirm, reset) come back with the session
+    // in the URL #fragment, which supabase-js reads on init. Unlike PKCE this
+    // needs no verifier stored in the requesting browser, so a link opened on
+    // another device/profile/mail app still works. With PKCE, every such open
+    // failed and users looped on "request a new link".
     _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { flowType: 'pkce' },
+      auth: { flowType: 'implicit', detectSessionInUrl: true },
     })
   }
   return _supabase
