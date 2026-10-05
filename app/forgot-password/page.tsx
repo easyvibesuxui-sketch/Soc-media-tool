@@ -38,7 +38,9 @@ function ForgotForm() {
       setSentTo(to)
       setCooldown(RESEND_COOLDOWN_S)
     } catch (err) {
-      setError(friendlyAuthError(err).message)
+      const e = friendlyAuthError(err)
+      setError(e.message)
+      if (e.retryAfter) setCooldown(e.retryAfter)
     } finally {
       setLoading(false)
     }
@@ -110,7 +112,9 @@ function ForgotForm() {
           />
         </div>
         {error && <Alert tone="error">{error}</Alert>}
-        <SubmitButton loading={loading}>Send reset link</SubmitButton>
+        <SubmitButton loading={loading} disabled={cooldown > 0}>
+          {cooldown > 0 ? `Send again in ${cooldown}s` : 'Send reset link'}
+        </SubmitButton>
       </form>
     </>
   )

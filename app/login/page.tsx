@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Mail, Loader2, MailCheck } from 'lucide-react'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase'
-import { callbackUrl, friendlyAuthError, passwordIsValid, safeNext } from '@/lib/auth'
+import { callbackUrl, friendlyAuthError, passwordIsValid, safeNext, type FriendlyAuthError } from '@/lib/auth'
 import { Alert, AuthShell, PasswordField, PasswordRules, SubmitButton, inputClass } from '@/components/auth/AuthUI'
 
 // Google sign-in needs a Google Cloud OAuth client configured in Supabase.
@@ -46,7 +46,7 @@ function LoginForm() {
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
-  const [error, setError] = useState<{ code: string; message: string } | null>(null)
+  const [error, setError] = useState<FriendlyAuthError | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   // After sign-up we swap the form for a "check your email" screen.
   const [sentTo, setSentTo] = useState<string | null>(null)
@@ -91,7 +91,9 @@ function LoginForm() {
       setInfo(`We sent a new confirmation link to ${to}.`)
       setCooldown(RESEND_COOLDOWN_S)
     } catch (err) {
-      setError(friendlyAuthError(err))
+      const e = friendlyAuthError(err)
+      setError(e)
+      if (e.retryAfter) setCooldown(e.retryAfter)
     } finally {
       setResending(false)
     }
@@ -151,7 +153,9 @@ function LoginForm() {
         router.replace(next)
       }
     } catch (err) {
-      setError(friendlyAuthError(err))
+      const e = friendlyAuthError(err)
+      setError(e)
+      if (e.retryAfter) setCooldown(e.retryAfter)
     } finally {
       setLoading(false)
     }

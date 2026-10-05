@@ -198,7 +198,9 @@ is kept but unused.
 - Signing up with an existing address returns a fake success with empty
   `identities` and sends no email; the login page detects that.
 - Free Supabase email ≈ 2/hour **project-wide** — don't burn it in tests; add
-  custom SMTP before launch.
+  custom SMTP before launch. Both that cap and the per-address 60s cooldown come
+  back as `over_email_send_rate_limit`; `friendlyAuthError()` tells them apart
+  (cooldown → `retryAfter` seconds, which the forms turn into a countdown).
 - Password policy is enforced client-side (8+, letter, number). Supabase's own
   minimum is still 6; raise it in Auth settings to match if you want it server-side.
 

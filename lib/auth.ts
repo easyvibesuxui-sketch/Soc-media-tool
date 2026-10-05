@@ -24,7 +24,14 @@ export function callbackUrl(next: string): string {
  * `message` is often unhelpful ("Invalid login credentials"). Map the ones
  * users actually hit to plain language.
  */
-export function friendlyAuthError(err: unknown): { code: string; message: string } {
+export type FriendlyAuthError = {
+  code: string
+  message: string
+  /** Seconds until the same request may be retried, when Supabase says so. */
+  retryAfter?: number
+}
+
+export function friendlyAuthError(err: unknown): FriendlyAuthError {
   const code =
     typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string'
       ? err.code
@@ -43,8 +50,22 @@ export function friendlyAuthError(err: unknown): { code: string; message: string
       return { code, message: 'That password is too weak. Use at least 8 characters with a letter and a number.' }
     case 'same_password':
       return { code, message: 'Your new password must be different from the old one.' }
-    case 'over_email_send_rate_limit':
-      return { code, message: 'Too many emails sent. Please wait a few minutes and try again.' }
+    case 'over_email_send_rate_limit': {
+      // Two different limits share this code:
+      // - per-address cooldown: "you can only request this after 26 seconds"
+      // - project-wide hourly cap of the built-in mailer: "email rate limit exceeded"
+      const secs = raw.match(/after (\d+) seconds?/)
+      if (secs) {
+        const retryAfter = Number(secs[1])
+        return { code, retryAfter, message: `Please wait ${retryAfter} seconds before requesting another email.` }
+      }
+      return {
+        code,
+        message:
+          "We can't send more emails right now (hourly sending limit reached). Please try again in up to an hour. " +
+          'If you remember your password, you can sign in now.',
+      }
+    }
     case 'over_request_rate_limit':
       return { code, message: 'Too many attempts. Please wait a minute and try again.' }
     case 'email_address_invalid':
