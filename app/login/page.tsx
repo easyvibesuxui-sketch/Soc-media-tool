@@ -168,7 +168,7 @@ function LoginForm() {
         <p className="text-sm text-gray-500 mb-1">We sent a confirmation link to</p>
         <p className="text-sm font-semibold text-gray-900 mb-4 break-all">{sentTo}</p>
         <p className="text-xs text-gray-400 mb-6">
-          Open the link <strong>in this same browser</strong> to finish signing in.
+          Click the link in that email to finish signing up.
           Not there? Check spam or promotions.
         </p>
 
